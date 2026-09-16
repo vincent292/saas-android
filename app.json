@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "Yopido POS",
+    "slug": "yopido-pos-mobile",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/images/icon.png",
+    "scheme": "yopidoposmobile",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "com.yopido.pos",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/images/icon.png"
+      },
+      "predictiveBackGestureEnabled": true,
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FFFFFF",
+          "image": "./assets/images/yopido-logo.png",
+          "imageWidth": 200
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Yopido usa la camara para escanear la mesa.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Yopido usa tus fotos para adjuntar comprobantes.",
+          "cameraPermission": "Yopido usa la camara para fotografiar comprobantes.",
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7fcc898b-5543-416d-bcb6-116fa34ff983"
+      }
+    }
+  }
+}
