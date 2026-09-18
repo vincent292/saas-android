@@ -5,7 +5,17 @@ import {
   Text,
   View,
 } from "react-native";
-import { Ban, Bike, Check, Clock3, ImagePlus, RefreshCw } from "lucide-react-native";
+import {
+  Ban,
+  Bike,
+  Check,
+  Clock3,
+  Eye,
+  ImagePlus,
+  Printer,
+  RefreshCw,
+  type LucideIcon,
+} from "lucide-react-native";
 import { api, errorMessage } from "@/lib/api";
 import type { Order, Payment, Receipt, Snapshot } from "@/lib/types";
 import { Button, c, Empty, Field, Label, Money, Notice, s, Sheet } from "./ui";
@@ -31,12 +41,49 @@ const colors = {
 export function Orders({
   data,
   onRefresh,
+  onPrint,
+  printing = false,
 }: {
   data: Snapshot;
   onRefresh: () => Promise<void>;
+  onPrint: (order: Order) => Promise<boolean>;
+  printing?: boolean;
 }) {
   const [filter, setFilter] = useState("active"),
     [selected, setSelected] = useState<string | null>(null);
+  const [quickBusy, setQuickBusy] = useState<string | null>(null),
+    [quickError, setQuickError] = useState(""),
+    [quickMessage, setQuickMessage] = useState("");
+  async function quickMutate(order: Order, action: string, payload: Record<string, unknown>) {
+    if (quickBusy) return;
+    setQuickBusy(`${order.id}:${action}`);
+    setQuickError("");
+    setQuickMessage("");
+    try {
+      const result = await api<{ status?: string }>("", {
+        restaurantId: data.restaurant.id,
+        orderId: order.id,
+        action,
+        ...payload,
+      });
+      if (action === "dispatch-rider" && result.status === "manual_fallback") {
+        setQuickMessage("No hay riders disponibles. Puedes asignarlo desde el detalle.");
+      } else if (action === "dispatch-rider") {
+        setQuickMessage(`Se esta buscando rider para ${order.order_number}.`);
+      } else if (action === "eta") {
+        setQuickMessage(`Tiempo de ${order.order_number} actualizado para el cliente.`);
+      } else if (action === "charge") {
+        setQuickMessage(`${order.order_number} cobrado.`);
+      } else {
+        setQuickMessage(`${order.order_number} actualizado.`);
+      }
+      await onRefresh();
+    } catch (error) {
+      setQuickError(errorMessage(error));
+    } finally {
+      setQuickBusy(null);
+    }
+  }
   const orders = data.orders.filter(
     (o) =>
       filter === "all" ||
@@ -70,70 +117,204 @@ export function Orders({
             />
           ))}
         </ScrollView>
-        {orders.map((o) => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={"Ver pedido " + o.order_number}
-            key={o.id}
-            onPress={() => setSelected(o.id)}
-            style={{
-              backgroundColor: c.white,
-              padding: 16,
-              borderWidth: 1,
-              borderColor: c.line,
-              borderRadius: 8,
-              gap: 10,
-            }}
-          >
-            <View style={s.between}>
-              <Text
-                numberOfLines={1}
+        <Notice error message={quickError} />
+        <Notice message={quickMessage} />
+        {orders.map((o) => {
+          const prepMinutes = Math.max(
+            0,
+            ...o.order_items.map((item) => Number(item.prep_minutes || 0)),
+          );
+          const estimatedMinutes = Math.max(
+            1,
+            prepMinutes + Number(o.eta_adjustment_minutes || 0) || 15,
+          );
+          const assignment = data.deliveryAssignments?.find(
+            (item) => item.order_id === o.id,
+          );
+          const nextStatus =
+            o.status === "accepted"
+              ? "preparing"
+              : o.status === "preparing"
+                ? "ready"
+                : o.status === "ready" && o.order_type !== "delivery"
+                  ? "delivered"
+                  : null;
+          const busy = quickBusy?.startsWith(`${o.id}:`) || false;
+          return (
+            <View
+              key={o.id}
+              style={{
+                backgroundColor: c.white,
+                borderWidth: 1,
+                borderColor: c.line,
+                borderRadius: 8,
+                overflow: "hidden",
+              }}
+            >
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={"Ver pedido " + o.order_number}
+                onPress={() => setSelected(o.id)}
+                style={({ pressed }) => ({
+                  padding: 16,
+                  gap: 10,
+                  opacity: pressed ? 0.72 : 1,
+                })}
+              >
+                <View style={s.between}>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      flex: 1,
+                      color: c.ink,
+                      fontWeight: "700",
+                      fontSize: 15,
+                    }}
+                  >
+                    {o.order_number.startsWith("POS-")
+                      ? "POS-" + o.order_number.slice(4, 12).toUpperCase()
+                      : o.order_number}
+                  </Text>
+                  <Text
+                    style={{
+                      color: colors[o.status],
+                      fontWeight: "700",
+                      fontSize: 12,
+                    }}
+                  >
+                    {statusLabels[o.status]}
+                  </Text>
+                </View>
+                <Label>
+                  {data.tables.find((t) => t.id === o.table_id)?.name ||
+                    (o.order_type === "delivery" ? "Delivery" : "Mostrador")}{" "}
+                  · {o.customer_name || "Cliente"}
+                </Label>
+                <Label muted>
+                  {o.order_items
+                    .map((i) => i.quantity + " " + i.product_name)
+                    .join(", ")}
+                </Label>
+                <View style={s.between}>
+                  <Text style={{ color: c.muted, fontSize: 12, flex: 1 }}>
+                    {new Date(o.created_at).toLocaleTimeString("es", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}{" "}
+                    · {o.payment_status === "paid" ? "Pagado" : "Pendiente de pago"}
+                    {![
+                      "ready",
+                      "delivered",
+                      "cancelled",
+                    ].includes(o.status)
+                      ? ` · ${estimatedMinutes} min`
+                      : ""}
+                  </Text>
+                  <Money value={o.total} currency={data.settings.currency} />
+                </View>
+                {Boolean(o.payment_receipt_url) && o.payment_status !== "paid" && (
+                  <Text style={s.badge}>Comprobante adjunto</Text>
+                )}
+              </Pressable>
+              <View
                 style={{
-                  flex: 1,
-                  color: c.ink,
-                  fontWeight: "700",
-                  fontSize: 15,
+                  borderTopWidth: 1,
+                  borderColor: c.line,
+                  padding: 10,
+                  flexDirection: "row",
+                  flexWrap: "wrap",
+                  gap: 8,
                 }}
               >
-                {o.order_number.startsWith("POS-")
-                  ? "POS-" + o.order_number.slice(4, 12).toUpperCase()
-                  : o.order_number}
-              </Text>
-              <Text
-                style={{
-                  color: colors[o.status],
-                  fontWeight: "700",
-                  fontSize: 12,
-                }}
-              >
-                {statusLabels[o.status]}
-              </Text>
+                <QuickAction
+                  title="Abrir"
+                  icon={Eye}
+                  disabled={busy}
+                  onPress={() => setSelected(o.id)}
+                />
+                {data.restaurant.canManage &&
+                  o.status === "pending" && (
+                    <QuickAction
+                      title="Aceptar"
+                      icon={Check}
+                      primary
+                      disabled={busy}
+                      onPress={() => void quickMutate(o, "accept", {})}
+                    />
+                  )}
+                {data.restaurant.canManage &&
+                  o.payment_status === "pending" &&
+                  !["delivered", "cancelled"].includes(o.status) && (
+                    <QuickAction
+                      title="Cobrar"
+                      icon={Check}
+                      disabled={busy || !data.cashOpen}
+                      onPress={() =>
+                        void quickMutate(o, "charge", {
+                          paymentMethod: o.payment_method,
+                          reference: o.payment_receipt_reference || "",
+                        })
+                      }
+                    />
+                  )}
+                {data.restaurant.canManage && nextStatus && (
+                  <QuickAction
+                    title={
+                      nextStatus === "preparing"
+                        ? "A cocina"
+                        : nextStatus === "ready"
+                          ? "Marcar listo"
+                          : "Entregado"
+                    }
+                    icon={Check}
+                    primary
+                    disabled={busy}
+                    onPress={() =>
+                      void quickMutate(o, "status", {
+                        expected: o.status,
+                        next: nextStatus,
+                      })
+                    }
+                  />
+                )}
+                {data.restaurant.canManage &&
+                  ["pending", "accepted", "preparing"].includes(o.status) && (
+                    <QuickAction
+                      title="+5 min"
+                      icon={Clock3}
+                      disabled={busy}
+                      onPress={() =>
+                        void quickMutate(o, "eta", {
+                          adjustmentMinutes: Math.min(
+                            180,
+                            Number(o.eta_adjustment_minutes || 0) + 5,
+                          ),
+                        })
+                      }
+                    />
+                  )}
+                {data.restaurant.canManage &&
+                  o.order_type === "delivery" &&
+                  o.status === "ready" &&
+                  !assignment && (
+                    <QuickAction
+                      title="Llamar moto"
+                      icon={Bike}
+                      primary
+                      disabled={busy}
+                      onPress={() => void quickMutate(o, "dispatch-rider", {})}
+                    />
+                  )}
+                <QuickAction
+                  title="Reimprimir"
+                  icon={Printer}
+                  disabled={busy || printing}
+                  onPress={() => void onPrint(o)}
+                />
+              </View>
             </View>
-            <Label>
-              {data.tables.find((t) => t.id === o.table_id)?.name ||
-                (o.order_type === "delivery" ? "Delivery" : "Mostrador")}{" "}
-              · {o.customer_name || "Cliente"}
-            </Label>
-            <Label muted>
-              {o.order_items
-                .map((i) => i.quantity + " " + i.product_name)
-                .join(", ")}
-            </Label>
-            <View style={s.between}>
-              <Text style={{ color: c.muted, fontSize: 12 }}>
-                {new Date(o.created_at).toLocaleTimeString("es", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}{" "}
-                · {o.payment_status === "paid" ? "Pagado" : "Pendiente de pago"}
-              </Text>
-              <Money value={o.total} currency={data.settings.currency} />
-            </View>
-            {Boolean(o.payment_receipt_url) && o.payment_status !== "paid" && (
-              <Text style={s.badge}>Comprobante adjunto</Text>
-            )}
-          </Pressable>
-        ))}
+          );
+        })}
         {!orders.length && <Empty title="Sin pedidos en esta vista" />}
       </ScrollView>
       {order && (
@@ -143,21 +324,69 @@ export function Orders({
           data={data}
           onClose={() => setSelected(null)}
           onRefresh={onRefresh}
+          onPrint={onPrint}
+          printing={printing}
         />
       )}
     </>
   );
 }
+
+function QuickAction({
+  title,
+  icon: Icon,
+  onPress,
+  disabled = false,
+  primary = false,
+}: {
+  title: string;
+  icon: LucideIcon;
+  onPress: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        minHeight: 40,
+        paddingHorizontal: 12,
+        borderRadius: 7,
+        borderWidth: primary ? 0 : 1,
+        borderColor: c.line,
+        backgroundColor: primary ? c.lime : c.white,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 7,
+        opacity: disabled ? 0.42 : pressed ? 0.72 : 1,
+      })}
+    >
+      <Icon size={17} color={c.ink} />
+      <Text style={{ color: c.ink, fontWeight: "700", fontSize: 12 }}>
+        {title}
+      </Text>
+    </Pressable>
+  );
+}
+
 function OrderDetail({
   order,
   data,
   onClose,
   onRefresh,
+  onPrint,
+  printing,
 }: {
   order: Order;
   data: Snapshot;
   onClose: () => void;
   onRefresh: () => Promise<void>;
+  onPrint: (order: Order) => Promise<boolean>;
+  printing: boolean;
 }) {
   const [payment, setPayment] = useState<Payment>(order.payment_method),
     [reference, setReference] = useState(order.payment_receipt_reference || ""),
@@ -228,6 +457,7 @@ function OrderDetail({
     data.restaurant.canManage &&
     order.payment_status === "pending" &&
     ["pending", "accepted", "preparing", "ready"].includes(order.status);
+  const canAccept = data.restaurant.canManage && order.status === "pending";
   const next =
     order.status === "accepted"
       ? "preparing"
@@ -310,6 +540,14 @@ function OrderDetail({
       <Label>
         {order.payment_status === "paid" ? "Pago aprobado" : "Pago pendiente"}
       </Label>
+      <Button
+        title="Reimprimir ticket"
+        icon={Printer}
+        secondary
+        busy={printing}
+        disabled={busy}
+        onPress={() => void onPrint(order)}
+      />
       {Boolean(order.payment_receipt_url) && (
         <Button
           title="Ver comprobante"
@@ -362,6 +600,14 @@ function OrderDetail({
             }
           />
         </>
+      )}
+      {canAccept && (
+        <Button
+          title="Aceptar pedido"
+          icon={Check}
+          busy={busy}
+          onPress={() => void mutate({ ...base, action: "accept" })}
+        />
       )}
       {data.restaurant.canManage && next && (
         <Button

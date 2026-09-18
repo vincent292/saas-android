@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -7,11 +7,14 @@ import {
   Clock3,
   LogOut,
   Play,
+  Printer,
   RefreshCw,
   ShoppingCart,
   Store,
 } from "lucide-react-native";
 import { usePos } from "@/hooks/use-pos";
+import { usePosNotifications } from "@/hooks/use-pos-notifications";
+import { usePosPrinter } from "@/hooks/use-pos-printer";
 import { api, errorMessage } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { Profile, Restaurant } from "@/lib/types";
@@ -19,6 +22,7 @@ import { Button, c, Empty, IconButton, Label, Notice, s, Sheet } from "./ui";
 import { Sale } from "./Sale";
 import { Orders } from "./Orders";
 import { Cash } from "./Cash";
+import { PrinterSettings } from "./PrinterSettings";
 export function Workspace({
   restaurant,
   profile,
@@ -29,12 +33,24 @@ export function Workspace({
   change: () => void;
 }) {
   const { data, error, refreshing, refresh, live } = usePos(restaurant.id);
+  const printer = usePosPrinter(restaurant.id);
   const [tab, setTab] = useState("sale"),
     [account, setAccount] = useState(false),
+    [printerOpen, setPrinterOpen] = useState(false),
     [message, setMessage] = useState(""),
     [shiftBusy, setShiftBusy] = useState(false),
     [shiftError, setShiftError] = useState("");
   const manager = data?.restaurant.canManage ?? restaurant.canManage;
+  const openIncomingOrders = useCallback(() => {
+    setTab("orders");
+    void refresh(false);
+  }, [refresh]);
+  const notifications = usePosNotifications({
+    enabled: manager,
+    onOpen: openIncomingOrders,
+    orders: data?.orders ?? [],
+    restaurantId: restaurant.id,
+  });
   const tabs = [
     { id: "sale", label: "Nuevo pedido", icon: ShoppingCart },
     ...(manager
@@ -99,12 +115,21 @@ export function Workspace({
             <Text style={{ fontSize: 11, color: live ? c.green : c.muted }}>
               {live ? "En vivo" : "Sincronizando"}
             </Text>
-            <IconButton
-              icon={RefreshCw}
-              label="Actualizar"
-              disabled={refreshing}
-              onPress={() => void refresh(true)}
-            />
+            <View style={{ flexDirection: "row", gap: 6 }}>
+              {manager ? (
+                <IconButton
+                  icon={Printer}
+                  label="Configurar impresora"
+                  onPress={() => setPrinterOpen(true)}
+                />
+              ) : null}
+              <IconButton
+                icon={RefreshCw}
+                label="Actualizar"
+                disabled={refreshing}
+                onPress={() => void refresh(true)}
+              />
+            </View>
           </View>
         </View>
         {Boolean(error) && (
@@ -121,6 +146,33 @@ export function Workspace({
             <Notice message={message} />
           </Pressable>
         )}
+        {Boolean(printer.error || printer.message) && (
+          <Pressable
+            accessibilityLabel="Cerrar aviso de impresora"
+            onPress={() => {
+              printer.setError("");
+              printer.setMessage("");
+            }}
+            style={{ paddingHorizontal: 12, paddingTop: 12 }}
+          >
+            <Notice error={Boolean(printer.error)} message={printer.error || printer.message} />
+          </Pressable>
+        )}
+        {manager && notifications.pendingCount > 0 ? (
+          <View style={{ paddingHorizontal: 12, paddingTop: 12, gap: 8 }}>
+            <Notice message={`${notifications.pendingCount} pedido${notifications.pendingCount === 1 ? "" : "s"} nuevo${notifications.pendingCount === 1 ? "" : "s"} esperando revision.`} />
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Button title="Revisar nuevos" onPress={openIncomingOrders} />
+              </View>
+              {notifications.sounding ? (
+                <View style={{ flex: 1 }}>
+                  <Button title="Silenciar" secondary onPress={notifications.stopSound} />
+                </View>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
         {!data ? (
           refreshing ? (
             <View style={{ flex: 1, justifyContent: "center" }}>
@@ -161,9 +213,19 @@ export function Workspace({
                     data={data}
                     onRefresh={() => refresh(false)}
                     onSent={setMessage}
+                    onCreated={(order) => {
+                      void printer.print(order, data, true);
+                    }}
                   />
                 </View>
-                {current === "orders" && manager ? <Orders data={data} onRefresh={() => refresh()} /> : null}
+                {current === "orders" && manager ? (
+                  <Orders
+                    data={data}
+                    onPrint={(order) => printer.print(order, data)}
+                    onRefresh={() => refresh()}
+                    printing={printer.printing}
+                  />
+                ) : null}
                 {current === "cash" && manager ? <Cash data={data} onRefresh={() => refresh()} /> : null}
               </>
             )}
@@ -221,10 +283,31 @@ export function Workspace({
           <Label>{profile.full_name}</Label>
           <Label>{restaurant.name}</Label>
           <Label>{manager ? "Administrador / Cajero" : "Mesero"}</Label>
+          {manager ? (
+            <>
+              <Label muted>
+                Notificaciones: {notifications.status === "ready" ? "activas" : notifications.status === "denied" ? "sin permiso" : notifications.status === "unsupported" ? "requieren app instalada" : notifications.status === "error" ? "pendientes de Firebase" : "configurando"}
+              </Label>
+              <Button
+                title={printer.connection ? `Impresora: ${printer.connection.name}` : "Configurar impresora"}
+                icon={Printer}
+                secondary
+                onPress={() => {
+                  setAccount(false);
+                  setPrinterOpen(true);
+                }}
+              />
+            </>
+          ) : null}
           {!manager && data?.waiterShift?.active ? (
             <>
               <Label muted>
-                Turno abierto desde {new Date(data.waiterShift.openedAt || Date.now()).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}
+                Turno abierto desde {data.waiterShift.openedAt
+                  ? new Date(data.waiterShift.openedAt).toLocaleTimeString("es", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "ahora"}
               </Label>
               <Notice error message={shiftError} />
               <Button title="Cerrar turno" icon={Clock3} secondary busy={shiftBusy} onPress={() => void setShift(false)} />
@@ -246,6 +329,13 @@ export function Workspace({
           />
         </Sheet>
       )}
+      {printerOpen ? (
+        <PrinterSettings
+          manager={printer}
+          onClose={() => setPrinterOpen(false)}
+          restaurantName={restaurant.name}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }

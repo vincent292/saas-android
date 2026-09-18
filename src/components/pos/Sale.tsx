@@ -102,10 +102,12 @@ export function Sale({
   data,
   onRefresh,
   onSent,
+  onCreated,
 }: {
   data: Snapshot;
   onRefresh: () => Promise<void>;
   onSent: (message: string) => void;
+  onCreated?: (order: Order) => void;
 }) {
   const restaurantId = data.restaurant.id;
   const draft = usePosDraftStore((state) => state.drafts[restaurantId]);
@@ -374,12 +376,13 @@ export function Sale({
           cart={cart}
           setCart={setCart}
           onClose={() => setCheckout(false)}
-          onDone={(message) => {
+          onDone={(message, createdOrder) => {
             setPending(false);
             setCheckout(false);
             setCart([]);
             if (mode === "pos") setTable(null);
             onSent(message);
+            if (createdOrder.order_type === "pos") onCreated?.(createdOrder);
             void onRefresh();
           }}
         />
@@ -729,7 +732,7 @@ function Checkout({
   cart: CartLine[];
   setCart: React.Dispatch<React.SetStateAction<CartLine[]>>;
   onClose: () => void;
-  onDone: (message: string) => void;
+  onDone: (message: string, order: Order) => void;
 }) {
   const [name, setName] = useState(""),
     [phone, setPhone] = useState(""),
@@ -741,7 +744,10 @@ function Checkout({
     [error, setError] = useState("");
   const requestId = useRef(randomUUID()),
     lock = useRef(false);
-  const attempt = useRef<{ payload: unknown; receipt: Receipt | null } | null>(
+  const [attempt, setAttempt] = useState<{
+    payload: unknown;
+    receipt: Receipt | null;
+  } | null>(
     null,
   );
   const total = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
@@ -782,18 +788,42 @@ function Checkout({
         }),
       ),
     };
-    attempt.current ??= { payload, receipt };
+    const currentAttempt = attempt ?? { payload, receipt };
+    if (!attempt) setAttempt(currentAttempt);
     onPending(true);
     try {
-      const result = await api<{ order_number: string }>(
+      const result = await api<{ id: string; order_number: string }>(
         "",
-        attempt.current.payload,
-        attempt.current.receipt,
+        currentAttempt.payload,
+        currentAttempt.receipt,
       );
-      onDone("Pedido " + result.order_number + " enviado.");
+      onDone("Pedido " + result.order_number + " enviado.", {
+        created_at: new Date().toISOString(),
+        customer_name: name.trim() || (table ? table.name : "Venta mostrador"),
+        eta_adjustment_minutes: 0,
+        id: result.id,
+        notes,
+        order_items: cart.map((item) => ({
+          id: item.key,
+          notes: item.notes,
+          prep_minutes: 0,
+          product_name: item.name,
+          quantity: item.quantity,
+          subtotal: item.price * item.quantity,
+        })),
+        order_number: result.order_number,
+        order_type: table ? "table" : "pos",
+        payment_method: payment,
+        payment_receipt_reference: reference || null,
+        payment_receipt_url: null,
+        payment_status: table ? "pending" : "paid",
+        status: table ? "pending" : "accepted",
+        table_id: table?.id ?? null,
+        total,
+      });
     } catch (e) {
       if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
-        attempt.current = null;
+        setAttempt(null);
         onPending(false);
       }
       setError(errorMessage(e));
@@ -802,7 +832,7 @@ function Checkout({
       setBusy(false);
     }
   }
-  const frozen = busy || Boolean(attempt.current);
+  const frozen = busy || Boolean(attempt);
   return (
     <Sheet
       title={table ? table.name : "Venta mostrador"}
@@ -815,7 +845,7 @@ function Checkout({
           <Notice error message={error} />
           <Button
             title={
-              attempt.current
+              attempt
                 ? "Reintentar mismo pedido"
                 : table
                   ? "Enviar pedido a caja"

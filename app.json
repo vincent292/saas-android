@@ -7,6 +7,15 @@
     "icon": "./assets/images/icon.png",
     "scheme": "yopidoposmobile",
     "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "com.yopido.pos",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSBluetoothAlwaysUsageDescription": "Yopido POS usa Bluetooth para imprimir comandas y recibos.",
+        "NSBluetoothPeripheralUsageDescription": "Yopido POS usa Bluetooth para imprimir comandas y recibos.",
+        "NSLocalNetworkUsageDescription": "Yopido POS usa la red local para conectarse a impresoras Wi-Fi."
+      }
+    },
     "android": {
       "package": "com.yopido.pos",
       "adaptiveIcon": {
@@ -15,7 +24,17 @@
       },
       "predictiveBackGestureEnabled": true,
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.CHANGE_WIFI_MULTICAST_STATE"
       ]
     },
     "web": {
@@ -47,7 +66,20 @@
           "cameraPermission": "Yopido usa la camara para fotografiar comprobantes.",
           "microphonePermission": false
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#C7F000",
+          "defaultChannel": "pos-orders",
+          "icon": "./assets/images/android-icon-monochrome.png",
+          "sounds": [
+            "./assets/notificaciones/notificaiones.mp3"
+          ]
+        }
+      ],
+      "expo-audio",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

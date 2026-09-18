@@ -10,6 +10,7 @@ async function setup(page: Page, waiter = false, initialShiftActive = true) {
   const calls: Record<string, unknown>[] = [];
   const profile = { id: '44444444-4444-4444-8444-444444444444', full_name: 'Ana Perez' };
   const restaurant = { id: restaurantId, name: 'Restaurante de prueba', slug: 'prueba', role: waiter ? 'waiter' : 'cashier', canManage: !waiter };
+  let accepted = false;
   let paid = false;
   let shiftActive = initialShiftActive;
   const snapshot = () => ({
@@ -18,7 +19,7 @@ async function setup(page: Page, waiter = false, initialShiftActive = true) {
     cashOpen: true, cashSession: waiter ? null : { id: '55555555-5555-4555-8555-555555555555', opening_amount: 100, opened_at: new Date().toISOString() },
     movements: [], settings: { currency: 'BOB', qr_payment_url: null, table_orders_enabled: true },
     waiterShift: waiter ? { active: shiftActive, openedAt: shiftActive ? new Date().toISOString() : null } : null,
-    orders: [{ id: '66666666-6666-4666-8666-666666666666', table_id: table.id, order_number: 'M-PRUEBA', order_type: 'table', status: paid ? 'accepted' : 'pending', payment_status: paid ? 'paid' : 'pending', payment_method: 'cash', customer_name: 'Cliente prueba', total: 30, notes: 'Mesa 4 | Mesero: Ana Perez', created_at: new Date().toISOString(), payment_receipt_url: null, payment_receipt_reference: null, order_items: [{ id: 'line', product_name: 'Hamburguesa clasica', quantity: 1, subtotal: 30, notes: '' }] }],
+    orders: [{ id: '66666666-6666-4666-8666-666666666666', table_id: table.id, order_number: 'M-PRUEBA', order_type: 'table', status: accepted || paid ? 'accepted' : 'pending', payment_status: paid ? 'paid' : 'pending', payment_method: 'cash', customer_name: 'Cliente prueba', total: 30, notes: 'Mesa 4 | Mesero: Ana Perez', created_at: new Date().toISOString(), payment_receipt_url: null, payment_receipt_reference: null, order_items: [{ id: 'line', product_name: 'Hamburguesa clasica', quantity: 1, subtotal: 30, notes: '' }] }],
   });
   const user = { id: profile.id, aud: 'authenticated', role: 'authenticated', email: 'prueba@example.test', user_metadata: {}, app_metadata: { provider: 'email' }, created_at: new Date().toISOString() };
   const token = Buffer.from(JSON.stringify({ alg: 'HS256' })).toString('base64url') + '.' + Buffer.from(JSON.stringify({ sub: profile.id, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url') + '.test';
@@ -37,7 +38,8 @@ async function setup(page: Page, waiter = false, initialShiftActive = true) {
       const body = form ? JSON.parse(String(form.get('payload'))) : route.request().postDataJSON();
       if (form?.get('receipt')) body.receiptAttached = true;
       calls.push(body);
-      if (body.action === 'charge') paid = true;
+      if (body.action === 'accept') accepted = true;
+      if (body.action === 'charge') { accepted = true; paid = true; }
       if (body.action === 'open-waiter-shift') shiftActive = true;
       if (body.action === 'close-waiter-shift') shiftActive = false;
       return route.fulfill({ json: { id: 'created', order_number: 'M-ENVIADO' } });
@@ -104,14 +106,13 @@ test('waiter opens a shift before accessing table orders', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Escanear mesa' })).toBeVisible();
   expect(calls[0].action).toBe('open-waiter-shift');
 });
-test('cashier approves payment and reviews close without auto-submission', async ({ page }, info) => {
+test('cashier accepts an order and reviews close without auto-submission', async ({ page }, info) => {
   const calls = await setup(page);
   await page.getByRole('tab', { name: /Pedidos/ }).click();
-  await page.getByRole('button', { name: 'Ver pedido M-PRUEBA' }).click();
-  await page.getByRole('button', { name: 'Aprobar pago y cobrar' }).click();
-  await expect(page.getByText('Pago aprobado', { exact: true })).toBeVisible();
-  expect(calls[0].action).toBe('charge');
-  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await page.getByRole('button', { name: 'Aceptar', exact: true }).click();
+  await expect(page.getByText('M-PRUEBA actualizado.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'A cocina' })).toBeVisible();
+  expect(calls[0].action).toBe('accept');
   await page.getByRole('tab', { name: 'Caja', exact: true }).click();
   await page.screenshot({ path: info.outputPath('caja-mobile.png'), fullPage: true });
   await page.getByRole('button', { name: 'Cerrar caja', exact: true }).click();
