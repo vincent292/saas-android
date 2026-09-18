@@ -39,6 +39,13 @@ const colors = {
   delivered: "#647182",
   cancelled: "#B33040",
 };
+
+function riderProgressLabel(status?: string) {
+  if (status === "delivered") return "Entregado";
+  if (status === "arrived") return "En camino al cliente";
+  return "Yendo al local";
+}
+
 export function Orders({
   data,
   onRefresh,
@@ -62,7 +69,7 @@ export function Orders({
     setQuickError("");
     setQuickMessage("");
     try {
-      const result = await api<{ status?: string }>("", {
+      const result = await api<{ status?: string; riderName?: string }>("", {
         restaurantId: data.restaurant.id,
         orderId: order.id,
         action,
@@ -70,8 +77,22 @@ export function Orders({
       });
       if (action === "dispatch-rider" && result.status === "manual_fallback") {
         setQuickMessage("No hay riders disponibles. Puedes asignarlo desde el detalle.");
+      } else if (action === "dispatch-rider" && result.status === "already_assigned") {
+        setQuickMessage(
+          result.riderName
+            ? `${result.riderName} aceptó el pedido y va rumbo al local.`
+            : "El rider aceptó el pedido y va rumbo al local.",
+        );
+      } else if (action === "dispatch-rider" && result.status === "pending_offer") {
+        setQuickMessage("Ya hay una oferta esperando respuesta del rider.");
+      } else if (action === "dispatch-rider" && result.status === "offered") {
+        setQuickMessage(
+          result.riderName
+            ? `Oferta enviada a ${result.riderName}.`
+            : `Se está buscando rider para ${order.order_number}.`,
+        );
       } else if (action === "dispatch-rider") {
-        setQuickMessage(`Se esta buscando rider para ${order.order_number}.`);
+        setQuickMessage(`Se está buscando rider para ${order.order_number}.`);
       } else if (action === "eta") {
         setQuickMessage(`Tiempo de ${order.order_number} actualizado para el cliente.`);
       } else if (action === "charge") {
@@ -220,6 +241,11 @@ export function Orders({
                 {Boolean(o.payment_receipt_url) && o.payment_status !== "paid" && (
                   <Text style={s.badge}>Comprobante adjunto</Text>
                 )}
+                {assignment ? (
+                  <Text style={{ color: c.green, fontSize: 12, fontWeight: "700" }}>
+                    {assignment.delivery_name || "El rider"} aceptó · {riderProgressLabel(assignment.status)}
+                  </Text>
+                ) : null}
               </Pressable>
               <View
                 style={{
@@ -440,9 +466,17 @@ function OrderDetail({
       if (action === "dispatch-rider" && result.status === "manual_fallback") {
         setMessage("No hay riders disponibles ahora. Puedes asignar uno manualmente.");
       } else if (action === "dispatch-rider" && result.status === "pending_offer") {
-        setMessage("Solicitud enviada al siguiente rider disponible.");
+        setMessage("Ya hay una oferta esperando respuesta del rider.");
+      } else if (action === "dispatch-rider" && result.status === "offered") {
+        setMessage(result.riderName ? `Oferta enviada a ${result.riderName}.` : "Oferta enviada al rider disponible.");
+      } else if (action === "dispatch-rider" && result.status === "already_assigned") {
+        setMessage(
+          result.riderName
+            ? `${result.riderName} aceptó el pedido y va rumbo al local.`
+            : "El rider aceptó el pedido y va rumbo al local.",
+        );
       } else if (action === "assign-rider") {
-        setMessage(result.riderName ? `Rider asignado: ${result.riderName}.` : "Rider asignado.");
+        setMessage(result.riderName ? `${result.riderName} asignado · Yendo al local.` : "Rider asignado · Yendo al local.");
       } else {
         setMessage("Pedido actualizado.");
       }
@@ -667,7 +701,10 @@ function OrderDetail({
           {assignment ? (
             <View style={{ borderRadius: 8, backgroundColor: "#EDF7F1", padding: 14, gap: 5 }}>
               <Label>{assignment.delivery_name || assignedRider?.full_name || "Rider asignado"}</Label>
-              <Label muted>{assignedRider?.plate_number || assignment.delivery_phone || assignment.status}</Label>
+              <Label muted>
+                {riderProgressLabel(assignment.status)}
+                {assignedRider?.plate_number ? ` · ${assignedRider.plate_number}` : assignment.delivery_phone ? ` · ${assignment.delivery_phone}` : ""}
+              </Label>
               {assignment.pickup_confirmation_code ? (
                 <View style={{ marginTop: 6 }}>
                   <Label muted>Código de retiro</Label>

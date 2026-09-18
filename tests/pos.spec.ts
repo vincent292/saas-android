@@ -137,6 +137,7 @@ test('cashier approval goes directly to ready when kitchen flow is disabled', as
 test('cashier can reveal the rider pickup code from the simplified order card', async ({ page }) => {
   await setup(page, false, true, true, true);
   await page.getByRole('tab', { name: /Pedidos/ }).click();
+  await expect(page.getByText('Moto prueba aceptó · Yendo al local', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Ver código' }).click();
   await expect(page.getByText('Código de retiro', { exact: true })).toBeVisible();
   await expect(page.getByText('4821', { exact: true })).toBeVisible();
