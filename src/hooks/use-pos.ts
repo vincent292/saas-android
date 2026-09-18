@@ -64,7 +64,7 @@ export function usePos(restaurantId: string) {
       }, 700);
     };
     let channel = supabase?.channel("pos-" + restaurantId);
-    for (const table of ["orders", "cash_sessions", "cash_movements", "tables"])
+    for (const table of ["orders", "cash_sessions", "cash_movements", "tables", "order_delivery_links", "restaurant_settings"])
       channel = channel?.on(
         "postgres_changes",
         {

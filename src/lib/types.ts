@@ -106,6 +106,7 @@ export type Snapshot = {
     currency: string;
     qr_payment_url: string | null;
     table_orders_enabled: boolean;
+    kitchen_enabled: boolean;
   };
   cashOpen: boolean;
   cashSession: CashSession | null;

@@ -1,9 +1,12 @@
-import { useEffect, type ReactNode } from "react";
-import { Modal, Pressable, Text, View, useWindowDimensions } from "react-native";
+import { useEffect, useState, type ReactNode } from "react";
+import { ActivityIndicator, Modal, Pressable, Text, View, useWindowDimensions } from "react-native";
+import { Image } from "expo-image";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Minus, Plus, RotateCcw, X } from "lucide-react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 export function ReceiptViewer({ uri, onClose }: { uri: string; onClose: () => void }) {
   const { width, height } = useWindowDimensions();
@@ -13,6 +16,8 @@ export function ReceiptViewer({ uri, onClose }: { uri: string; onClose: () => vo
   const translateY = useSharedValue(0);
   const savedX = useSharedValue(0);
   const savedY = useSharedValue(0);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const reset = () => {
     scale.value = withTiming(1);
@@ -23,7 +28,11 @@ export function ReceiptViewer({ uri, onClose }: { uri: string; onClose: () => vo
     savedY.value = 0;
   };
 
-  useEffect(() => reset(), [uri]);
+  useEffect(() => {
+    reset();
+    setLoading(true);
+    setLoadError(false);
+  }, [uri]);
 
   const pinch = Gesture.Pinch()
     .onUpdate((event) => {
@@ -63,7 +72,35 @@ export function ReceiptViewer({ uri, onClose }: { uri: string; onClose: () => vo
         </View>
         <GestureDetector gesture={Gesture.Simultaneous(pinch, pan)}>
           <View style={{ flex: 1, overflow: "hidden", alignItems: "center", justifyContent: "center" }}>
-            <Animated.Image source={{ uri }} resizeMode="contain" style={[{ width, height: height - 150 }, animatedStyle]} />
+            <AnimatedImage
+              accessibilityLabel="Imagen del comprobante"
+              cachePolicy="none"
+              contentFit="contain"
+              onDisplay={() => setLoading(false)}
+              onError={() => {
+                setLoading(false);
+                setLoadError(true);
+              }}
+              recyclingKey={uri}
+              source={uri}
+              style={[{ width, height: height - 150 }, animatedStyle]}
+            />
+            {loading ? (
+              <View style={{ position: "absolute", alignItems: "center", gap: 12 }}>
+                <ActivityIndicator color="white" size="large" />
+                <Text style={{ color: "white", fontWeight: "600" }}>Cargando comprobante…</Text>
+              </View>
+            ) : null}
+            {loadError ? (
+              <View style={{ position: "absolute", maxWidth: 300, alignItems: "center", gap: 8, padding: 20 }}>
+                <Text style={{ color: "white", textAlign: "center", fontSize: 16, fontWeight: "700" }}>
+                  No se pudo mostrar el comprobante.
+                </Text>
+                <Text style={{ color: "#B9C4D0", textAlign: "center" }}>
+                  Cierra esta vista y vuelve a intentarlo para generar un enlace nuevo.
+                </Text>
+              </View>
+            ) : null}
           </View>
         </GestureDetector>
         <View style={{ minHeight: 72, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 14 }}>

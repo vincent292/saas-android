@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   Text,
@@ -50,7 +51,8 @@ export function Orders({
   printing?: boolean;
 }) {
   const [filter, setFilter] = useState("active"),
-    [selected, setSelected] = useState<string | null>(null);
+    [selected, setSelected] = useState<string | null>(null),
+    [visibleCodeOrder, setVisibleCodeOrder] = useState<string | null>(null);
   const [quickBusy, setQuickBusy] = useState<string | null>(null),
     [quickError, setQuickError] = useState(""),
     [quickMessage, setQuickMessage] = useState("");
@@ -131,9 +133,12 @@ export function Orders({
           const assignment = data.deliveryAssignments?.find(
             (item) => item.order_id === o.id,
           );
+          const hasKitchenFlow = data.settings.kitchen_enabled !== false;
           const nextStatus =
             o.status === "accepted"
-              ? "preparing"
+              ? hasKitchenFlow
+                ? "preparing"
+                : "ready"
               : o.status === "preparing"
                 ? "ready"
                 : o.status === "ready" && o.order_type !== "delivery"
@@ -298,19 +303,36 @@ export function Orders({
                   o.status === "ready" &&
                   !assignment && (
                     <QuickAction
-                      title="Llamar moto"
+                      title={quickBusy === `${o.id}:dispatch-rider` ? "Buscando rider…" : "Llamar moto"}
                       icon={Bike}
                       primary
+                      busy={quickBusy === `${o.id}:dispatch-rider`}
                       disabled={busy}
                       onPress={() => void quickMutate(o, "dispatch-rider", {})}
                     />
                   )}
+                {data.restaurant.canManage && assignment?.pickup_confirmation_code ? (
+                  <QuickAction
+                    title={visibleCodeOrder === o.id ? "Ocultar código" : "Ver código"}
+                    icon={Eye}
+                    disabled={busy}
+                    onPress={() => setVisibleCodeOrder((current) => current === o.id ? null : o.id)}
+                  />
+                ) : null}
                 <QuickAction
                   title="Reimprimir"
                   icon={Printer}
                   disabled={busy || printing}
                   onPress={() => void onPrint(o)}
                 />
+                {assignment?.pickup_confirmation_code && visibleCodeOrder === o.id ? (
+                  <View style={{ width: "100%", borderRadius: 7, backgroundColor: "#EDF7F1", padding: 12 }}>
+                    <Text style={{ color: c.muted, fontSize: 12, fontWeight: "600" }}>Código de retiro</Text>
+                    <Text selectable style={{ color: c.ink, fontSize: 28, fontWeight: "800", letterSpacing: 4 }}>
+                      {assignment.pickup_confirmation_code}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             </View>
           );
@@ -338,18 +360,20 @@ function QuickAction({
   onPress,
   disabled = false,
   primary = false,
+  busy = false,
 }: {
   title: string;
   icon: LucideIcon;
   onPress: () => void;
   disabled?: boolean;
   primary?: boolean;
+  busy?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={title}
-      disabled={disabled}
+      disabled={disabled || busy}
       onPress={onPress}
       style={({ pressed }) => ({
         minHeight: 40,
@@ -362,10 +386,10 @@ function QuickAction({
         alignItems: "center",
         justifyContent: "center",
         gap: 7,
-        opacity: disabled ? 0.42 : pressed ? 0.72 : 1,
+        opacity: disabled && !busy ? 0.42 : pressed ? 0.72 : 1,
       })}
     >
-      <Icon size={17} color={c.ink} />
+      {busy ? <ActivityIndicator color={c.ink} size="small" /> : <Icon size={17} color={c.ink} />}
       <Text style={{ color: c.ink, fontWeight: "700", fontSize: 12 }}>
         {title}
       </Text>
@@ -458,9 +482,12 @@ function OrderDetail({
     order.payment_status === "pending" &&
     ["pending", "accepted", "preparing", "ready"].includes(order.status);
   const canAccept = data.restaurant.canManage && order.status === "pending";
+  const hasKitchenFlow = data.settings.kitchen_enabled !== false;
   const next =
     order.status === "accepted"
-      ? "preparing"
+      ? hasKitchenFlow
+        ? "preparing"
+        : "ready"
       : order.status === "preparing"
         ? "ready"
         : order.status === "ready" && order.order_type !== "delivery"

@@ -6,7 +6,7 @@ import { cashTotals, parseAmount, tableFromQr } from '../src/lib/domain';
 const restaurantId = '11111111-1111-4111-8111-111111111111';
 const productId = '22222222-2222-4222-8222-222222222222';
 const table = { id: '33333333-3333-4333-8333-333333333333', name: 'Mesa 4', code: 'M4', capacity: 4, status: 'available' };
-async function setup(page: Page, waiter = false, initialShiftActive = true) {
+async function setup(page: Page, waiter = false, initialShiftActive = true, kitchenEnabled = true, withRider = false) {
   const calls: Record<string, unknown>[] = [];
   const profile = { id: '44444444-4444-4444-8444-444444444444', full_name: 'Ana Perez' };
   const restaurant = { id: restaurantId, name: 'Restaurante de prueba', slug: 'prueba', role: waiter ? 'waiter' : 'cashier', canManage: !waiter };
@@ -17,9 +17,10 @@ async function setup(page: Page, waiter = false, initialShiftActive = true) {
     restaurant, products: [{ id: productId, name: 'Hamburguesa clasica', description: 'Con papas', price: 30, image_url: null, category_id: 'food' }],
     categories: [{ id: 'food', name: 'Comidas' }], variants: [], groups: [], options: [], tables: [table],
     cashOpen: true, cashSession: waiter ? null : { id: '55555555-5555-4555-8555-555555555555', opening_amount: 100, opened_at: new Date().toISOString() },
-    movements: [], settings: { currency: 'BOB', qr_payment_url: null, table_orders_enabled: true },
+    movements: [], settings: { currency: 'BOB', qr_payment_url: null, table_orders_enabled: true, kitchen_enabled: kitchenEnabled },
     waiterShift: waiter ? { active: shiftActive, openedAt: shiftActive ? new Date().toISOString() : null } : null,
-    orders: [{ id: '66666666-6666-4666-8666-666666666666', table_id: table.id, order_number: 'M-PRUEBA', order_type: 'table', status: accepted || paid ? 'accepted' : 'pending', payment_status: paid ? 'paid' : 'pending', payment_method: 'cash', customer_name: 'Cliente prueba', total: 30, notes: 'Mesa 4 | Mesero: Ana Perez', created_at: new Date().toISOString(), payment_receipt_url: null, payment_receipt_reference: null, order_items: [{ id: 'line', product_name: 'Hamburguesa clasica', quantity: 1, subtotal: 30, notes: '' }] }],
+    orders: [{ id: '66666666-6666-4666-8666-666666666666', table_id: withRider ? null : table.id, order_number: 'M-PRUEBA', order_type: withRider ? 'delivery' : 'table', status: withRider ? 'ready' : accepted || paid ? (kitchenEnabled ? 'accepted' : 'ready') : 'pending', payment_status: paid ? 'paid' : 'pending', payment_method: 'cash', customer_name: 'Cliente prueba', total: 30, notes: 'Mesa 4 | Mesero: Ana Perez', created_at: new Date().toISOString(), payment_receipt_url: null, payment_receipt_reference: null, eta_adjustment_minutes: 0, order_items: [{ id: 'line', product_name: 'Hamburguesa clasica', quantity: 1, subtotal: 30, prep_minutes: 10, notes: '' }] }],
+    deliveryAssignments: withRider ? [{ order_id: '66666666-6666-4666-8666-666666666666', restaurant_rider_id: null, delivery_name: 'Moto prueba', delivery_phone: '70000000', status: 'active', pickup_confirmation_code: '4821', pickup_code_verified_at: null, assigned_at: new Date().toISOString() }] : [],
   });
   const user = { id: profile.id, aud: 'authenticated', role: 'authenticated', email: 'prueba@example.test', user_metadata: {}, app_metadata: { provider: 'email' }, created_at: new Date().toISOString() };
   const token = Buffer.from(JSON.stringify({ alg: 'HS256' })).toString('base64url') + '.' + Buffer.from(JSON.stringify({ sub: profile.id, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url') + '.test';
@@ -122,6 +123,23 @@ test('cashier accepts an order and reviews close without auto-submission', async
   await page.getByRole('button', { name: 'Confirmar cierre' }).click();
   await expect(page.getByText(/Caja cerrada. Diferencia/)).toBeVisible();
   expect(calls[1].action).toBe('close-cash');
+});
+
+test('cashier approval goes directly to ready when kitchen flow is disabled', async ({ page }) => {
+  const calls = await setup(page, false, true, false);
+  await page.getByRole('tab', { name: /Pedidos/ }).click();
+  await page.getByRole('button', { name: 'Aceptar', exact: true }).click();
+  await expect(page.getByText('Listo', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'A cocina' })).toHaveCount(0);
+  expect(calls[0].action).toBe('accept');
+});
+
+test('cashier can reveal the rider pickup code from the simplified order card', async ({ page }) => {
+  await setup(page, false, true, true, true);
+  await page.getByRole('tab', { name: /Pedidos/ }).click();
+  await page.getByRole('button', { name: 'Ver código' }).click();
+  await expect(page.getByText('Código de retiro', { exact: true })).toBeVisible();
+  await expect(page.getByText('4821', { exact: true })).toBeVisible();
 });
 
 test('cashier sees the active table account and settles it as one visit', async ({ page }, info) => {
